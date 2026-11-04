@@ -7,10 +7,9 @@ from .softness import CAST_DISTANCE, UNDER_DISTANCE, distance_mask
 
 
 def _expand_shadow(node, name):
-    # Nuke's Erode (filter) node is named Dilate internally. Negative size
-    # expands the white matte; keep the UI's expansion value positive.
+    # Positive Dilate size expands alpha in the target Nuke host.
     expand = nuke.nodes.Dilate(name=name, inputs=[node], channels="alpha")
-    expand["size"].setExpression("-max(parent.shadow_expand,0)")
+    expand["size"].setExpression("max(parent.shadow_expand,0)")
     return expand
 
 
