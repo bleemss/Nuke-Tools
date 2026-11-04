@@ -2,6 +2,33 @@
 
 ## Character Shadow (2D alpha)
 
+### Follow a moving character
+
+Connect the character **after** any transforms that position it in the scene.
+Click **Analyze Alpha / Follow Feet**, enter a first/last frame, and let analysis
+finish. The tool samples bottom-up alpha row averages and writes Ground contact Y
+keys at the lowest occupied row on each frame. Horizontal movement already comes
+from the moving input silhouette. This is a one-time analysis, not a live tracker:
+reanalyze after changing the matte, timing, format or upstream transforms.
+
+Start with the default **Alpha row threshold** of `0.001`. Raise it to ignore
+faint noise; lower it if thin or faint feet disappear. It measures the average
+over the full image width, not an individual pixel's alpha. Scanning large frames
+or long clips can be slow. Cancel leaves existing contact keys unchanged.
+Existing contact animation requires confirmation before full replacement;
+the replacement is one Undo operation. Other shadow controls are preserved.
+
+Empty frames hold the previous detected height; leading empty frames use the
+first detected height. Entirely empty clips leave the control unchanged. Only
+pixels inside the input image format are inspected. The matte must contain only
+the intended character. This detects the bottom of the silhouette, not physical
+ground: jumps, cropped feet, props or edge noise require manual key corrections.
+It does not estimate background lighting, and it does not stabilize bouncing feet.
+
+Host smoke check: animate a rectangle vertically with a known bottom coordinate,
+analyze, and compare the contact keys. Also check an empty frame, cancellation,
+Undo, a missing alpha channel and save/reopen. These Nuke API checks are pending.
+
 Creates a native, editable Nuke Group that projects an input alpha into a ground
 shadow. Intended for Nuke 17.0v4 on Windows; host validation is still pending.
 Add this to your `menu.py` after the plugin path setup below:
@@ -28,7 +55,7 @@ Try Falloff `1` and distance `500`, then increase the distance for a longer fade
 The distance follows the projected shadow direction, including horizontal reach.
 Softness is applied after the fade, so a blurred edge can extend past that distance.
 
-To update: replace your installed `nuke_tools/shadow.py` with the latest file,
+To update: replace your installed `nuke_tools` folder with the latest folder,
 restart Nuke, and create a new Character Shadow node. Existing groups keep their
 original controls and behavior; keep them until you have copied their settings
 and checked the replacement.

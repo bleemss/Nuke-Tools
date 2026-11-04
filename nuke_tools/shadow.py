@@ -2,6 +2,87 @@
 
 import nuke
 
+from .contact import find_contact
+
+
+def track_contact(group):
+    """Analyze first, then write keys atomically in a single undo operation."""
+    source = group.input(0)
+    if source is None:
+        nuke.message("Connect the character with alpha to the shadow input first.")
+        return
+    panel = nuke.Panel("Follow feet from alpha")
+    panel.addSingleLineInput("First frame", str(int(nuke.root()["first_frame"].value())))
+    panel.addSingleLineInput("Last frame", str(int(nuke.root()["last_frame"].value())))
+    if not panel.show():
+        return
+    try:
+        first, last = int(panel.value("First frame")), int(panel.value("Last frame"))
+        if last < first:
+            raise ValueError
+    except ValueError:
+        nuke.message("Enter whole frame numbers, with last frame at least first frame.")
+        return
+    contact = group["contact_y"]
+    if contact.isAnimated() or contact.hasExpression():
+        if not nuke.ask("Replace ALL existing Ground contact Y animation or expressions?\n"
+                        "Other controls are preserved. You can Undo the replacement."):
+            return
+    threshold = float(group["alpha_threshold"].value())
+    if not 0 < threshold < 1:
+        nuke.message("Alpha row threshold must be between 0 and 1.")
+        return
+    original_frame = nuke.frame()
+    values = []
+    empty = []
+    task = nuke.ProgressTask("Follow feet from alpha")
+    try:
+        for frame in range(first, last + 1):
+            if task.isCancelled():
+                raise InterruptedError
+            nuke.frame(frame)
+            if "rgba.alpha" not in source.channels():
+                raise ValueError("The connected character has no rgba.alpha channel.")
+            width, height = source.width(), source.height()
+            task.setMessage("Frame %d" % frame)
+            task.setProgress(int(100 * (frame - first) / (last - first + 1)))
+
+            def sample_row(row):
+                if task.isCancelled():
+                    raise InterruptedError
+                return nuke.sample(source, "rgba.alpha", width / 2.0, row + 0.5, width, 1)
+
+            value = find_contact(height, sample_row, threshold)
+            if value is None:
+                empty.append(frame)
+            values.append((frame, value))
+    except InterruptedError:
+        nuke.message("Analysis cancelled. Ground contact was not changed.")
+        return
+    except Exception as error:
+        nuke.message("Analysis failed; ground contact was not changed.\n%s" % error)
+        return
+    finally:
+        nuke.frame(original_frame)
+        del task
+    detected = [value for frame, value in values if value is not None]
+    if not detected:
+        nuke.message("No alpha above the threshold was found. Ground contact was not changed.")
+        return
+    # Hold the previous contact through empty frames; backfill leading empties
+    # from the first detected frame rather than inventing a ground coordinate.
+    previous = detected[0]
+    with nuke.Undo("Follow feet from alpha"):
+        contact.clearAnimated()
+        contact.setAnimated()
+        for frame, value in values:
+            if value is not None:
+                previous = value
+            contact.setValueAt(previous, frame)
+    nuke.message("Contact keys created for %d frames.\n"
+                 "%d frames had no detectable alpha and use held contact.\n"
+                 "Review lifted feet, cropped mattes and noisy edges." % (len(values), len(empty)))
+
 
 def create_shadow():
     selected = nuke.selectedNodes()
@@ -15,6 +96,14 @@ def create_shadow():
         group.addKnob(contact)
         contact.setRange(0, 2160)
         contact.setValue(0)
+        threshold = nuke.Double_Knob("alpha_threshold", "Alpha row threshold")
+        threshold.setRange(0.00001, 0.05)
+        threshold.setValue(0.001)
+        threshold.setTooltip("Minimum mean alpha across a full image row. Raise to reject faint noise; lower for narrow or faint feet.")
+        group.addKnob(threshold)
+        follow = nuke.PyScript_Knob("follow_feet", "Analyze Alpha / Follow Feet")
+        follow.setCommand("from nuke_tools.shadow import track_contact\ntrack_contact(nuke.thisNode())")
+        group.addKnob(follow)
         for name, label, default, low, high in (
             ("reach", "Horizontal reach (pixels)", 250, -2000, 2000),
             ("length", "Ground projection", 0.35, -2, 2),
