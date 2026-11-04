@@ -2,6 +2,25 @@
 
 ## Character Shadow (2D alpha)
 
+### Widen farther from the feet
+
+**Distance widening (pixels)** adds horizontal dilation gradually with distance
+from the ground line. Try `30` with Falloff distance `300` for a cast shadow.
+The extra width is zero at contact, reaches the chosen value at Falloff distance,
+and holds that value beyond it. **Expand shadow** remains the uniform base
+expansion. Blur and opacity falloff are independent; the contact layer is untouched.
+
+This works in both modes using the same distance definitions as Distance softness.
+For the small Under Character patch, try a shorter Falloff distance such as `40`.
+Widening changes horizontal thickness, not length or vertical placement. It uses
+four interpolated dilation levels before blur, so it is an artistic approximation
+and may show blended edges on hard, unblurred mattes. Zero bypasses the extra
+processing and preserves the previous result. It does not simulate a 3D light.
+
+In Nuke, test a narrow rectangle: contact width should stay fixed while farther
+rows widen. Check positive/negative projection, both modes, a moving matte,
+zero widening, and combinations with blur and expansion. Host checks are pending.
+
 ### Expand and soften with distance
 
 The **Shadow** tab now includes **Expand shadow**, **Distance softness**, and

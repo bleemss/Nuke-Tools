@@ -3,7 +3,7 @@
 import nuke
 
 from .contact import CONTACT_ALPHA, CONTACT_MASK, find_contact
-from .softness import CAST_DISTANCE, UNDER_DISTANCE, distance_mask
+from .softness import CAST_DISTANCE, UNDER_DISTANCE, distance_mask, widening_mask
 
 
 def hold_ground(group):
@@ -19,11 +19,30 @@ def hold_ground(group):
         knob.setValue(value)
 
 
-def _expand_shadow(node, name):
+def _expand_shadow(node, name, distance):
     # Positive Dilate size expands alpha in the target Nuke host.
     expand = nuke.nodes.Dilate(name=name, inputs=[node], channels="alpha")
     expand["size"].setExpression("max(parent.shadow_expand,0)")
-    return expand
+    previous = expand
+    # Interpolate four progressively wider alpha dilations. Only X receives
+    # distance widening, so the floor line and shadow length stay in place.
+    for stage in range(1, 5):
+        wide = nuke.nodes.Dilate(name=name + "Wide%d" % stage, inputs=[node], channels="alpha")
+        wide["size"].setExpression(
+            "max(parent.shadow_expand,0)+max(parent.distance_widen,0)*%g" % (stage / 4.0), 0)
+        wide["size"].setExpression("max(parent.shadow_expand,0)", 1)
+        mask = nuke.nodes.Expression(name=name + "WidthMask%d" % stage, inputs=[wide])
+        mask["expr3"].setValue(widening_mask(distance, stage))
+        blend = nuke.nodes.Keymix(name=name + "WidthBlend%d" % stage, channels="alpha")
+        blend.setInput(0, previous)
+        blend.setInput(1, wide)
+        blend.setInput(2, mask)
+        previous = blend
+    bypass = nuke.nodes.Switch(name=name + "WideningEnabled")
+    bypass.setInput(0, expand)
+    bypass.setInput(1, previous)
+    bypass["which"].setExpression("parent.distance_widen>0")
+    return bypass
 
 
 def _distance_softness(node, near_blur, name, distance, near_x, near_y):
@@ -152,6 +171,7 @@ def create_shadow():
             ("falloff", "Falloff", 0, 0, 1),
             ("falloff_distance", "Falloff distance (pixels)", 500, 1, 4000),
             ("shadow_expand", "Expand shadow (pixels)", 0, 0, 100),
+            ("distance_widen", "Distance widening (pixels)", 0, 0, 200),
             ("distance_softness", "Distance softness", 0, 0, 1),
             ("far_softness", "Extra far softness (pixels)", 40, 0, 300),
         ):
@@ -162,6 +182,7 @@ def create_shadow():
         group["falloff"].setTooltip("0 keeps uniform density. 1 fades fully to transparent at the falloff distance.")
         group["falloff_distance"].setTooltip("Distance along the projected ground shadow where the fade reaches its maximum. Measured from the contact line in output pixels.")
         group["shadow_expand"].setTooltip("Expand the broad shadow's alpha before blurring, in either mode. The independent contact shadow is unchanged.")
+        group["distance_widen"].setTooltip("Extra horizontal dilation reached at Falloff distance. Starts at zero extra width at the ground line. Works in both modes; contact shadow stays unchanged.")
         group["distance_softness"].setTooltip("0 keeps uniform softness. 1 blends fully to the far blur at Falloff distance. Opacity Falloff is independent.")
         group["far_softness"].setTooltip("Additional blur at Falloff distance, added to the active mode's base softness. This is an artistic blend between two blurs.")
         tint = nuke.Color_Knob("tint", "Shadow color")
@@ -234,7 +255,7 @@ def create_shadow():
                     "(%s)+parent.reach*((%s)-parent.contact_y)/max(height,1)" % (x, y), 0)
                 projection["to%d" % index].setExpression(
                     "parent.contact_y-parent.length*((%s)-parent.contact_y)" % y, 1)
-            expanded = _expand_shadow(projection, "ExpandCastShadow")
+            expanded = _expand_shadow(projection, "ExpandCastShadow", CAST_DISTANCE)
             blur = nuke.nodes.Blur(name="ShadowSoftness", inputs=[expanded], channels="alpha")
             blur["size"].setExpression("parent.softness")
             distance_blur = _distance_softness(expanded, blur, "Cast", CAST_DISTANCE,
@@ -252,7 +273,7 @@ def create_shadow():
             under["scale"].setExpression("max(parent.under_depth,0.001)", 1)
             under["translate"].setExpression("parent.under_offset.x", 0)
             under["translate"].setExpression("parent.under_offset.y", 1)
-            under_expanded = _expand_shadow(under, "ExpandUnderShadow")
+            under_expanded = _expand_shadow(under, "ExpandUnderShadow", UNDER_DISTANCE)
             under_blur = nuke.nodes.Blur(name="UnderCharacterSoftness", inputs=[under_expanded], channels="alpha")
             under_blur["size"].setExpression("max(parent.under_width,0)+max(parent.under_softness,0)", 0)
             under_blur["size"].setExpression("max(parent.under_softness,0)", 1)
