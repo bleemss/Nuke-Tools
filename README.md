@@ -22,6 +22,17 @@ install_shadow_menu()
 5. Adjust softness, density and shadow color. Output RGB is premultiplied.
 6. Merge the shadow **over the background**, then the character **over that**.
 
+**Falloff** fades density with distance from the feet. At `0` the shadow stays
+uniform; at `1` it fades fully to transparent at **Falloff distance (pixels)**.
+Try Falloff `1` and distance `500`, then increase the distance for a longer fade.
+The distance follows the projected shadow direction, including horizontal reach.
+Softness is applied after the fade, so a blurred edge can extend past that distance.
+
+To update: replace your installed `nuke_tools/shadow.py` with the latest file,
+restart Nuke, and create a new Character Shadow node. Existing groups keep their
+original controls and behavior; keep them until you have copied their settings
+and checked the replacement.
+
 This is an artist-directed planar projection, not automatic light estimation or
 a physically accurate 3D shadow. It uses uniform softness, assumes a horizontal
 contact line, and cannot reconstruct hidden body geometry, uneven surfaces or
@@ -33,6 +44,10 @@ confirm the contact line is fixed, reach moves the shadow left/right, projection
 changes its length, density zero makes it transparent, and color composites
 without fringes. Then test a character matte, Undo creation, and save/reopen the
 script. These host checks cannot run in the current cloud machine.
+Also check Falloff `0` against the original uniform shadow, Falloff `1` at
+several distances, both projection signs and left/right reach. Contact density
+should stay strongest and the far end should fade; tinted output should remain
+premultiplied when merged.
 
 A dependency-free Python panel intended for Foundry Nuke 17.0v4 on Windows.
 Scan Read nodes for missing files and sequence gaps, then preview and apply

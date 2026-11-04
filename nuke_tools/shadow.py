@@ -20,11 +20,15 @@ def create_shadow():
             ("length", "Ground projection", 0.35, -2, 2),
             ("softness", "Softness (pixels)", 15, 0, 200),
             ("density", "Density", 0.5, 0, 1),
+            ("falloff", "Falloff", 0, 0, 1),
+            ("falloff_distance", "Falloff distance (pixels)", 500, 1, 4000),
         ):
             knob = nuke.Double_Knob(name, label)
             knob.setRange(low, high)
             group.addKnob(knob)
             knob.setValue(default)
+        group["falloff"].setTooltip("0 keeps uniform density. 1 fades fully to transparent at the falloff distance.")
+        group["falloff_distance"].setTooltip("Distance along the projected ground shadow where the fade reaches its maximum. Measured from the contact line in output pixels.")
         tint = nuke.Color_Knob("tint", "Shadow color")
         group.addKnob(tint)
         tint.setValue([0, 0, 0])
@@ -39,7 +43,16 @@ def create_shadow():
             for channel in ("expr0", "expr1", "expr2"):
                 silhouette[channel].setValue("0")
             silhouette["expr3"].setValue("clamp(a,0,1)")
-            projection = nuke.nodes.CornerPin2D(name="GroundProjection", inputs=[silhouette])
+            fade = nuke.nodes.Expression(name="DistanceFalloff", inputs=[silhouette])
+            # A source pixel's displacement from the fixed contact line becomes
+            # (reach * dy / height, -length * dy) after ground projection.
+            # Fade before resampling/blur so the soft edge keeps the same fade.
+            fade["expr3"].setValue(
+                "a*(1-clamp(parent.falloff,0,1)*clamp("
+                "abs(y-parent.contact_y)*sqrt("
+                "pow(parent.reach/max(height,1),2)+pow(parent.length,2))"
+                "/max(parent.falloff_distance,1),0,1))")
+            projection = nuke.nodes.CornerPin2D(name="GroundProjection", inputs=[fade])
             # Affine map: x'=x+reach*(y-contact.y)/height,
             # y'=contact.y-length*(y-contact.y). The contact line stays fixed.
             corners = (("0", "0"), ("width", "0"), ("width", "height"), ("0", "height"))
