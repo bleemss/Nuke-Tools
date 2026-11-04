@@ -3,7 +3,10 @@
 
 # Nuke Expression syntax; kept here so boundary behavior can be checked without
 # a Nuke installation. Use pixel centers when evaluating the source matte.
-CONTACT_MASK = "clamp(a,0,1)*(y>=parent.contact_y)*(y<parent.contact_y+max(parent.contact_band,1))"
+CONTACT_MASK = (
+    "clamp(a,0,1)*(y>=parent.contact_y)*"
+    "(1-clamp((y-parent.contact_y)/max(parent.contact_band,1),0,1))"
+)
 CONTACT_ALPHA = "clamp(a*parent.contact_density*parent.contact_strength,0,1)"
 
 

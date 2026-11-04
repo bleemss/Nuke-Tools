@@ -6,19 +6,19 @@ from nuke_tools.contact import CONTACT_ALPHA, CONTACT_MASK, find_contact
 
 class ContactMatteTests(unittest.TestCase):
     def evaluate(self, expression, **values):
-        parent = SimpleNamespace(contact_y=100, contact_band=30,
+        parent = SimpleNamespace(contact_y=100, contact_band=5,
                                  contact_density=0.5, contact_strength=1)
         return eval(expression, {"__builtins__": {}}, dict(
             parent=parent, a=values.get("a", 1), y=values.get("y", 100.5),
             clamp=lambda value, low, high: max(low, min(high, value)), max=max))
 
     def test_band_excludes_below_ground_and_lifted_alpha(self):
-        for y, expected in ((99.5, 0), (100.5, 1), (129.5, 1), (130.5, 0)):
-            self.assertEqual(self.evaluate(CONTACT_MASK, y=y), expected)
+        for y, expected in ((99.5, 0), (100, 1), (100.5, .9), (102.5, .5), (105, 0), (130.5, 0)):
+            self.assertAlmostEqual(self.evaluate(CONTACT_MASK, y=y), expected)
 
     def test_transparent_and_partial_alpha(self):
         self.assertEqual(self.evaluate(CONTACT_MASK, a=0), 0)
-        self.assertEqual(self.evaluate(CONTACT_MASK, a=0.25), 0.25)
+        self.assertEqual(self.evaluate(CONTACT_MASK, a=0.25, y=100), 0.25)
         self.assertEqual(self.evaluate(CONTACT_ALPHA, a=0), 0)
         self.assertEqual(self.evaluate(CONTACT_ALPHA, a=0.5), 0.25)
 
@@ -27,6 +27,16 @@ class ContactMatteTests(unittest.TestCase):
         result = eval(CONTACT_ALPHA, {"__builtins__": {}}, dict(
             parent=parent, a=1, clamp=lambda value, low, high: max(low, min(high, value))))
         self.assertEqual(result, 0)
+
+    def test_raised_foot_loses_patch_while_planted_foot_remains(self):
+        planted = [self.evaluate(CONTACT_MASK, y=row + .5) for row in range(100, 104)]
+        raised = [self.evaluate(CONTACT_MASK, y=row + .5) for row in range(106, 110)]
+        self.assertGreater(sum(planted), 0)
+        self.assertEqual(sum(raised), 0)
+
+    def test_fade_is_monotonic_above_floor(self):
+        samples = [self.evaluate(CONTACT_MASK, y=100 + offset * .5) for offset in range(12)]
+        self.assertEqual(samples, sorted(samples, reverse=True))
 
 
 class ContactTests(unittest.TestCase):

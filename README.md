@@ -63,8 +63,9 @@ over the long cast shadow. It shares the main shadow color and Ground contact Y,
 including analyzed animation, but has independent density and softness.
 
 - **Enable contact shadow** bypasses this layer when unchecked.
-- **Source alpha band** selects only the bottom strip above the ground line.
-  Start at 30 pixels; reduce it to help exclude a raised foot.
+- **Contact tolerance** selects a narrow strip above the ground line (default
+  5 pixels). Alpha is strongest at the line and fades to zero at the top of the
+  tolerance. A foot fully above this strip contributes no contact patch.
 - **Patch depth** compresses that strip vertically (default 5 pixels).
 - **Width spread** adds horizontal blur without shifting the foot positions.
 - **Softness** blurs the patch in both directions. Blurring can reduce peak density.
@@ -72,16 +73,25 @@ including analyzed animation, but has independent density and softness.
   Set strength to zero during a jump or reduce it when contact looks wrong.
 
 The patch follows horizontal motion in the incoming alpha and vertical motion
-through Ground contact Y. Connect the fully positioned character and run
-**Analyze Alpha / Follow Feet** as needed. This is a silhouette-based approximation:
-it does not identify planted feet, and strength affects both feet together.
-Lowering the band can exclude a raised foot only when it is above the band.
-For jumps, correct the ground-contact keys and animate contact strength manually.
+through Ground contact Y. For a sideways walk on a level floor in a locked shot,
+set Ground contact Y at the planted sole and keep it fixed. If it already has
+Follow Feet keys, choose a frame with a planted foot and click **Hold Ground at
+Current Value**. It asks before removing animation and can be undone. It also
+changes the broad shadow's shared ground line. You can rerun analysis afterward.
+
+Do not follow a lifted foot with the ground line: that would keep it inside the
+contact tolerance and produce a floating patch. For movement into depth, animate
+the actual floor height as needed. The detector does not identify anatomical
+feet; any alpha inside the strip contributes. Soft blur may spread a valid patch
+below the ground line in the image; the restriction applies before blur. Contact
+strength still affects both feet together and can be corrected manually.
 
 Install the updated `nuke_tools` folder, restart Nuke and create a new group;
 existing groups are unchanged. In Nuke, check a two-foot matte moving horizontally
 and vertically: the patches should follow it. Check that alpha above the source
-band contributes nothing; disabling the layer or setting strength to zero should
+band contributes nothing, a lifted foot loses its patch while a planted foot
+retains one, and holding ground clears only Ground contact Y animation with Undo.
+Disabling the layer or setting strength to zero should
 restore the cast-only result. Check colored shadows over a checkerboard, animation,
 Undo and save/reopen. Host rendering checks are pending.
 

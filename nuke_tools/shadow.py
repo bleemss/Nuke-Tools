@@ -6,6 +6,19 @@ from .contact import CONTACT_ALPHA, CONTACT_MASK, find_contact
 from .softness import CAST_DISTANCE, UNDER_DISTANCE, distance_mask
 
 
+def hold_ground(group):
+    """Freeze the floor at its current evaluated height, with undo support."""
+    knob = group["contact_y"]
+    value = knob.value()
+    if knob.isAnimated() or knob.hasExpression():
+        if not nuke.ask("Remove Ground contact Y animation and hold the floor at %g?\n"
+                        "This affects both the broad shadow and contact shadow. You can Undo." % value):
+            return
+    with nuke.Undo("Hold shadow ground height"):
+        knob.clearAnimated()
+        knob.setValue(value)
+
+
 def _expand_shadow(node, name):
     # Positive Dilate size expands alpha in the target Nuke host.
     expand = nuke.nodes.Dilate(name=name, inputs=[node], channels="alpha")
@@ -127,6 +140,10 @@ def create_shadow():
         follow = nuke.PyScript_Knob("follow_feet", "Analyze Alpha / Follow Feet")
         follow.setCommand("from nuke_tools.shadow import track_contact\ntrack_contact(nuke.thisNode())")
         group.addKnob(follow)
+        hold = nuke.PyScript_Knob("hold_ground", "Hold Ground at Current Value")
+        hold.setCommand("from nuke_tools.shadow import hold_ground\nhold_ground(nuke.thisNode())")
+        hold.setTooltip("For a level floor in a locked shot: freeze the current ground height instead of following raised feet. Replaces contact-height animation after confirmation.")
+        group.addKnob(hold)
         for name, label, default, low, high in (
             ("reach", "Horizontal reach (pixels)", 250, -2000, 2000),
             ("length", "Ground projection", 0.35, -2, 2),
@@ -172,7 +189,7 @@ def create_shadow():
         group.addKnob(enabled)
         enabled.setValue(True)
         for name, label, default, low, high in (
-            ("contact_band", "Source alpha band (pixels)", 30, 1, 200),
+            ("contact_band", "Contact tolerance (pixels)", 5, 1, 100),
             ("contact_depth", "Patch depth (pixels)", 5, 1, 100),
             ("contact_width", "Width spread (pixels)", 10, 0, 100),
             ("contact_softness", "Softness (pixels)", 4, 0, 100),
@@ -183,7 +200,7 @@ def create_shadow():
             knob.setRange(low, high)
             group.addKnob(knob)
             knob.setValue(default)
-        group["contact_band"].setTooltip("Use only the alpha within this height above Ground contact Y. A narrower band helps exclude lifted feet.")
+        group["contact_band"].setTooltip("Alpha touching the floor is strongest and fades to zero at this height above Ground contact Y. Start at 5 pixels. Keep the ground line fixed for a level floor; tracking raised feet defeats the contact test.")
         group["contact_width"].setTooltip("Extra horizontal blur spreads each footprint without moving it sideways.")
         group["contact_strength"].setTooltip("Animate down for jumps or incorrect contact. This affects the whole contact layer, not individual feet.")
         note = nuke.Text_Knob("help", "", "Place Ground contact at the feet. Reach moves the tip left/right.\n"
@@ -279,7 +296,7 @@ def create_shadow():
             group.end()
         if source is not None:
             group.setXYpos(source.xpos() + 150, source.ypos() + 100)
-        group["contact_y"].setTooltip("Set this to the feet/ground line in image pixels. The projection fixes this horizontal line.")
+        group["contact_y"].setTooltip("Set this to the floor in image pixels. For a sideways walk on a level floor, hold it fixed so raised feet leave the contact tolerance. Follow Feet estimates silhouette bottom, not physical ground.")
         group.showControlPanel()
     return group
 
