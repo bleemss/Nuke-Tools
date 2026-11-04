@@ -1,6 +1,32 @@
 import unittest
+from types import SimpleNamespace
 
-from nuke_tools.contact import find_contact
+from nuke_tools.contact import CONTACT_ALPHA, CONTACT_MASK, find_contact
+
+
+class ContactMatteTests(unittest.TestCase):
+    def evaluate(self, expression, **values):
+        parent = SimpleNamespace(contact_y=100, contact_band=30,
+                                 contact_density=0.5, contact_strength=1)
+        return eval(expression, {"__builtins__": {}}, dict(
+            parent=parent, a=values.get("a", 1), y=values.get("y", 100.5),
+            clamp=lambda value, low, high: max(low, min(high, value)), max=max))
+
+    def test_band_excludes_below_ground_and_lifted_alpha(self):
+        for y, expected in ((99.5, 0), (100.5, 1), (129.5, 1), (130.5, 0)):
+            self.assertEqual(self.evaluate(CONTACT_MASK, y=y), expected)
+
+    def test_transparent_and_partial_alpha(self):
+        self.assertEqual(self.evaluate(CONTACT_MASK, a=0), 0)
+        self.assertEqual(self.evaluate(CONTACT_MASK, a=0.25), 0.25)
+        self.assertEqual(self.evaluate(CONTACT_ALPHA, a=0), 0)
+        self.assertEqual(self.evaluate(CONTACT_ALPHA, a=0.5), 0.25)
+
+    def test_strength_can_disable_contact(self):
+        parent = SimpleNamespace(contact_density=0.8, contact_strength=0)
+        result = eval(CONTACT_ALPHA, {"__builtins__": {}}, dict(
+            parent=parent, a=1, clamp=lambda value, low, high: max(low, min(high, value))))
+        self.assertEqual(result, 0)
 
 
 class ContactTests(unittest.TestCase):

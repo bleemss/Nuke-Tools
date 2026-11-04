@@ -2,7 +2,7 @@
 
 import nuke
 
-from .contact import find_contact
+from .contact import CONTACT_ALPHA, CONTACT_MASK, find_contact
 
 
 def track_contact(group):
@@ -92,6 +92,8 @@ def create_shadow():
         if source is not None:
             group.setInput(0, source)
         group.addKnob(nuke.Tab_Knob("shadow_controls", "Shadow"))
+        mode = nuke.Enumeration_Knob("shadow_mode", "Shadow mode", ["Cast Shadow", "Under Character"])
+        group.addKnob(mode)
         contact = nuke.Double_Knob("contact_y", "Ground contact Y (pixels)")
         group.addKnob(contact)
         contact.setRange(0, 2160)
@@ -121,6 +123,42 @@ def create_shadow():
         tint = nuke.Color_Knob("tint", "Shadow color")
         group.addKnob(tint)
         tint.setValue([0, 0, 0])
+        group.addKnob(nuke.Tab_Knob("under_controls", "Under Character"))
+        for name, label, default, low, high in (
+            ("under_depth", "Depth (vertical scale)", 0.04, 0.001, 0.25),
+            ("under_width", "Width spread (pixels)", 20, 0, 300),
+            ("under_softness", "Softness (pixels)", 12, 0, 200),
+            ("under_density", "Density", 0.35, 0, 1),
+        ):
+            knob = nuke.Double_Knob(name, label)
+            knob.setRange(low, high)
+            group.addKnob(knob)
+            knob.setValue(default)
+        offset = nuke.XY_Knob("under_offset", "Offset (pixels)")
+        group.addKnob(offset)
+        offset.setValue([0, -8])
+        group["under_depth"].setTooltip("Compress the full silhouette around Ground contact Y. 0.04 makes a 600-pixel character about 24 pixels deep before blur.")
+        group["under_width"].setTooltip("Extra horizontal blur widens and blends the footprint while following the input's horizontal position.")
+        group["under_offset"].setTooltip("Move only the broad shadow patch. Negative Y moves it downward. The contact shadow stays at the feet.")
+        group.addKnob(nuke.Tab_Knob("contact_controls", "Contact Shadow"))
+        enabled = nuke.Boolean_Knob("contact_enabled", "Enable contact shadow")
+        group.addKnob(enabled)
+        enabled.setValue(True)
+        for name, label, default, low, high in (
+            ("contact_band", "Source alpha band (pixels)", 30, 1, 200),
+            ("contact_depth", "Patch depth (pixels)", 5, 1, 100),
+            ("contact_width", "Width spread (pixels)", 10, 0, 100),
+            ("contact_softness", "Softness (pixels)", 4, 0, 100),
+            ("contact_density", "Density", 0.65, 0, 1),
+            ("contact_strength", "Strength (animatable)", 1, 0, 1),
+        ):
+            knob = nuke.Double_Knob(name, label)
+            knob.setRange(low, high)
+            group.addKnob(knob)
+            knob.setValue(default)
+        group["contact_band"].setTooltip("Use only the alpha within this height above Ground contact Y. A narrower band helps exclude lifted feet.")
+        group["contact_width"].setTooltip("Extra horizontal blur spreads each footprint without moving it sideways.")
+        group["contact_strength"].setTooltip("Animate down for jumps or incorrect contact. This affects the whole contact layer, not individual feet.")
         note = nuke.Text_Knob("help", "", "Place Ground contact at the feet. Reach moves the tip left/right.\n"
                               "Positive Ground projection casts downward; negative casts upward.\n"
                               "Merge this shadow OVER the scene, UNDER the character.")
@@ -158,7 +196,50 @@ def create_shadow():
             for knob, channel in (("expr0", "r"), ("expr1", "g"), ("expr2", "b")):
                 color[knob].setValue("parent.tint.%s*clamp(a*parent.density,0,1)" % channel)
             color["expr3"].setValue("clamp(a*parent.density,0,1)")
-            nuke.nodes.Output(inputs=[color])
+            # Overhead-style branch uses the whole silhouette, independent of
+            # cast direction/falloff. X stays unchanged to follow lateral motion.
+            under = nuke.nodes.Transform(name="UnderCharacterProjection", inputs=[silhouette])
+            under["center"].setValue(0, 0)
+            under["center"].setExpression("parent.contact_y", 1)
+            under["scale"].setValue(1, 0)
+            under["scale"].setExpression("max(parent.under_depth,0.001)", 1)
+            under["translate"].setExpression("parent.under_offset.x", 0)
+            under["translate"].setExpression("parent.under_offset.y", 1)
+            under_blur = nuke.nodes.Blur(name="UnderCharacterSoftness", inputs=[under], channels="alpha")
+            under_blur["size"].setExpression("max(parent.under_width,0)+max(parent.under_softness,0)", 0)
+            under_blur["size"].setExpression("max(parent.under_softness,0)", 1)
+            under_color = nuke.nodes.Expression(name="UnderCharacterColor", inputs=[under_blur])
+            for knob, channel in (("expr0", "r"), ("expr1", "g"), ("expr2", "b")):
+                under_color[knob].setValue("parent.tint.%s*clamp(a*parent.under_density,0,1)" % channel)
+            under_color["expr3"].setValue("clamp(a*parent.under_density,0,1)")
+            base_shadow = nuke.nodes.Switch(name="ShadowMode")
+            base_shadow.setInput(0, color)
+            base_shadow.setInput(1, under_color)
+            base_shadow["which"].setExpression("parent.shadow_mode")
+            # Separate branch: isolate the feet before compressing vertically.
+            # X is unchanged so footprints follow the moving input silhouette.
+            foot_band = nuke.nodes.Expression(name="ContactFootBand", inputs=[silhouette])
+            foot_band["expr3"].setValue(CONTACT_MASK)
+            flatten = nuke.nodes.Transform(name="FlattenContact", inputs=[foot_band])
+            flatten["center"].setValue(0, 0)
+            flatten["center"].setExpression("parent.contact_y", 1)
+            flatten["scale"].setValue(1, 0)
+            flatten["scale"].setExpression("max(parent.contact_depth,1)/max(parent.contact_band,1)", 1)
+            contact_blur = nuke.nodes.Blur(name="ContactSoftness", inputs=[flatten], channels="alpha")
+            contact_blur["size"].setExpression("max(parent.contact_width,0)+max(parent.contact_softness,0)", 0)
+            contact_blur["size"].setExpression("max(parent.contact_softness,0)", 1)
+            contact_color = nuke.nodes.Expression(name="ContactColorAndDensity", inputs=[contact_blur])
+            for knob, channel in (("expr0", "r"), ("expr1", "g"), ("expr2", "b")):
+                contact_color[knob].setValue("parent.tint.%s*(%s)" % (channel, CONTACT_ALPHA))
+            contact_color["expr3"].setValue(CONTACT_ALPHA)
+            combined = nuke.nodes.Merge2(name="ContactOverCast", operation="over")
+            combined.setInput(0, base_shadow)  # B: selected broad shadow
+            combined.setInput(1, contact_color)  # A: contact shadow
+            output_switch = nuke.nodes.Switch(name="ContactEnabled")
+            output_switch.setInput(0, base_shadow)
+            output_switch.setInput(1, combined)
+            output_switch["which"].setExpression("parent.contact_enabled")
+            nuke.nodes.Output(inputs=[output_switch])
         finally:
             group.end()
         if source is not None:

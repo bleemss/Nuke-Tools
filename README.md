@@ -2,6 +2,63 @@
 
 ## Character Shadow (2D alpha)
 
+### Soft shadow directly under the character
+
+On the **Shadow** tab choose **Shadow mode → Under Character**. This replaces
+the long cast layer with a compressed whole-silhouette patch; the independent
+contact layer is still available. On the **Under Character** tab start with:
+
+- **Depth:** `0.04` (a 600-pixel-tall silhouette becomes about 24 pixels deep).
+- **Width spread:** `20` pixels of extra horizontal blur to blend the shape.
+- **Softness:** `12` pixels; increase for a softer overhead-light look.
+- **Density:** `0.35`; increase if the patch is too faint after blur.
+- **Offset:** X `0`, Y `-8`; adjust Y to position the patch beneath the shoes.
+
+The patch follows the incoming character's horizontal position and compresses
+around animated **Ground contact Y**. Width spread expands via blur rather than
+scaling around the frame center, so it does not shift a moving character's patch
+sideways. It can soften and widen the source shape, but cannot make it narrower
+than the source without upstream matte adjustments. Depth is a scale, not a fixed
+pixel height; poses with different silhouette heights may vary in patch depth.
+
+Main Shadow color applies to both modes. Cast reach, ground projection, falloff,
+cast softness and cast density only affect Cast Shadow mode. Contact controls
+remain independent of either mode and of the broad patch's offset.
+
+Nuke validation still required: switch modes on a moving matte, check ground-line
+tracking and offsets, confirm width changes do not displace the patch, compare
+with the contact layer disabled, and check premultiplied tinted output. Existing
+groups do not gain these controls automatically; create a new group after update.
+
+### Contact shadows
+
+New groups have a **Contact Shadow** tab with a separate contact layer combined
+over the long cast shadow. It shares the main shadow color and Ground contact Y,
+including analyzed animation, but has independent density and softness.
+
+- **Enable contact shadow** bypasses this layer when unchecked.
+- **Source alpha band** selects only the bottom strip above the ground line.
+  Start at 30 pixels; reduce it to help exclude a raised foot.
+- **Patch depth** compresses that strip vertically (default 5 pixels).
+- **Width spread** adds horizontal blur without shifting the foot positions.
+- **Softness** blurs the patch in both directions. Blurring can reduce peak density.
+- **Density** sets opacity; **Strength** is a separate animatable multiplier.
+  Set strength to zero during a jump or reduce it when contact looks wrong.
+
+The patch follows horizontal motion in the incoming alpha and vertical motion
+through Ground contact Y. Connect the fully positioned character and run
+**Analyze Alpha / Follow Feet** as needed. This is a silhouette-based approximation:
+it does not identify planted feet, and strength affects both feet together.
+Lowering the band can exclude a raised foot only when it is above the band.
+For jumps, correct the ground-contact keys and animate contact strength manually.
+
+Install the updated `nuke_tools` folder, restart Nuke and create a new group;
+existing groups are unchanged. In Nuke, check a two-foot matte moving horizontally
+and vertically: the patches should follow it. Check that alpha above the source
+band contributes nothing; disabling the layer or setting strength to zero should
+restore the cast-only result. Check colored shadows over a checkerboard, animation,
+Undo and save/reopen. Host rendering checks are pending.
+
 ### Follow a moving character
 
 Connect the character **after** any transforms that position it in the scene.

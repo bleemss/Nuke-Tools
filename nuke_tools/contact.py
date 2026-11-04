@@ -1,6 +1,12 @@
 """Host-independent contact detection from bottom-up alpha row averages."""
 
 
+# Nuke Expression syntax; kept here so boundary behavior can be checked without
+# a Nuke installation. Use pixel centers when evaluating the source matte.
+CONTACT_MASK = "clamp(a,0,1)*(y>=parent.contact_y)*(y<parent.contact_y+max(parent.contact_band,1))"
+CONTACT_ALPHA = "clamp(a*parent.contact_density*parent.contact_strength,0,1)"
+
+
 def find_contact(height, sample_row, threshold):
     """Return the lowest occupied pixel edge, or None for an empty matte.
 
