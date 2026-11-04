@@ -2,6 +2,32 @@
 
 ## Character Shadow (2D alpha)
 
+### Expand and soften with distance
+
+The **Shadow** tab now includes **Expand shadow**, **Distance softness**, and
+**Extra far softness**. Expansion grows the broad shadow's alpha before blur,
+without changing the independent contact layer. These controls work in both modes.
+
+For a cast shadow, try base Softness `5`, Distance softness `1`, Extra far softness
+`40`, and Falloff distance `300`. At ground contact the base blur is used; farther
+along the cast direction it blends toward base plus extra blur, reaching the far
+blur at Falloff distance. **Falloff** still controls opacity independently: set it
+to `0` to keep density while varying softness. Expand shadow `5–15` is a starting
+point for thickening the silhouette before softening it.
+
+In Under Character mode, distance is measured vertically from the offset ground
+line in either direction; a shorter Falloff distance such as `30–60` generally
+fits the compact patch better. Base softness and width spread come from the
+Under Character tab. The patch is not radially blurred around individual feet.
+
+This is an artistic blend of two fixed blurs, not a physically based penumbra
+simulation. Near-horizontal cast projections are poorly conditioned; use Under
+Character mode for overhead-style patches. Settings default to zero expansion
+and zero distance softness to preserve the previous look. Host checks pending:
+verify positive expansion grows alpha, distance softness zero matches base blur,
+far edges soften with distance, and tinted output stays premultiplied. Update the
+whole `nuke_tools` folder and create a new group to get the new controls.
+
 ### Soft shadow directly under the character
 
 On the **Shadow** tab choose **Shadow mode → Under Character**. This replaces

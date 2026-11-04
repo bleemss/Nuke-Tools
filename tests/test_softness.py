@@ -1,0 +1,41 @@
+import math
+import unittest
+from types import SimpleNamespace
+
+from nuke_tools.softness import CAST_DISTANCE, UNDER_DISTANCE, distance_mask
+
+
+class SoftnessTests(unittest.TestCase):
+    def sample(self, expression, y, **settings):
+        values = dict(contact_y=100, reach=250, length=0.5,
+                      distance_softness=1, falloff_distance=500,
+                      under_offset=SimpleNamespace(y=-8))
+        values.update(settings)
+        return eval(expression, {"__builtins__": {}}, dict(
+            parent=SimpleNamespace(**values), y=y, height=1000,
+            max=max, abs=abs, pow=pow, sqrt=math.sqrt,
+            clamp=lambda value, low, high: max(low, min(high, value))))
+
+    def test_contact_uses_near_blur(self):
+        self.assertEqual(self.sample(distance_mask(CAST_DISTANCE), 100), 0)
+
+    def test_midpoint_endpoint_and_saturation(self):
+        # A reach of 250 and length of .5 yields sqrt(1+.5^2) units
+        # along the projection for every output Y pixel.
+        scale = math.sqrt(1.25)
+        for distance, expected in ((250, .5), (500, 1), (1000, 1)):
+            for sign in (-1, 1):
+                self.assertAlmostEqual(self.sample(distance_mask(CAST_DISTANCE),
+                                       100 + sign * distance / scale), expected)
+
+    def test_disabled_and_partial_strength(self):
+        self.assertEqual(self.sample(distance_mask(CAST_DISTANCE), 1000, distance_softness=0), 0)
+        self.assertEqual(self.sample(distance_mask(CAST_DISTANCE), 1000, distance_softness=.5), .5)
+
+    def test_under_offset_moves_near_line(self):
+        self.assertEqual(self.sample(distance_mask(UNDER_DISTANCE), 92), 0)
+        self.assertEqual(self.sample(distance_mask(UNDER_DISTANCE), 592), 1)
+
+    def test_zero_projection_and_zero_distance_are_guarded(self):
+        self.assertTrue(math.isfinite(self.sample(distance_mask(CAST_DISTANCE), 101,
+                                                 length=0, falloff_distance=0)))
