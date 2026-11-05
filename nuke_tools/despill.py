@@ -2,7 +2,7 @@
 
 import nuke
 
-from .despill_math import EDGE_OPACITY_FACTOR, NORMALIZE, green_expression
+from .despill_math import EDGE_OPACITY_FACTOR, green_expression
 
 
 
@@ -46,13 +46,18 @@ def _erode(source, name, width):
     return node
 
 
-def _fill(source, name, radius):
-    blur = nuke.nodes.Blur(name=name + 'WeightedBlur', inputs=[source], channels='rgba')
-    blur['size'].setExpression(radius)
-    normalized = _expression(name=name + 'Normalize', inputs=[blur])
-    for index, channel in enumerate('rgb'):
-        normalized['expr%d' % index].setValue(NORMALIZE.format(channel=channel))
-    return normalized
+def _native_extend(source):
+    """Use the EdgeExtend interface reported by the user's Nuke 17 host."""
+    node = nuke.nodes.EdgeExtend(name='NativeEdgeExtend', inputs=[source])
+    node['channels'].setValue('rgba')
+    node['matte'].setValue('Matte Alpha')
+    # Despill runs on straight RGB; premultiplication happens once at output.
+    node['sourceIsPremultiplied'].setValue(False)
+    node['premultiply'].setValue(False)
+    node['erode'].setExpression('max(parent.extend_erode,0)')
+    node['detailAmount'].setExpression('max(parent.extend_detail,0)')
+    node['disable'].setExpression('!parent.extend_enabled')
+    return node
 
 
 def create_despill():
@@ -84,16 +89,16 @@ def create_despill():
         enabled.setValue(False)
         group.addKnob(enabled)
         for args in (
-            ('extend_width', 'Edge thickness (pixels)', 10, 200, 'Inset used both to exclude contaminated source colors and define the replacement band.'),
-            ('extend_reach', 'Color reach (pixels)', 30, 400, 'Blur size used to spread inset foreground colors. Increase if the fill cannot reach the edge.'),
-            ('extend_detail', 'Replicate local detail', 0.75, 1, '0 uses a broad smooth fill; 1 uses a smaller local fill where available. Does not synthesize hidden texture.'),
+            ('extend_width', 'Replacement edge thickness (pixels)', 10, 200, 'Inward band where extended RGB replaces the despilled image. The eroded core is protected; RGB outside alpha can also be filled.'),
+            ('extend_erode', 'Source erode (native)', 2.5, 200, 'Drives the native EdgeExtend Erode control, independently of the replacement band.'),
+            ('extend_detail', 'Detail amount (native)', 2, 10, 'Drives the native EdgeExtend Detail Amount control; this is no longer a blend between two blur sizes.'),
             ('extend_mix', 'Extension amount', 1, 1, 'Blend original despilled edge colors with the extension.'),
             ('extend_opacity', 'Edge opacity', 1, 1, 'Opacity multiplier in the extension edge band: 1 preserves alpha; 0 removes the edge. Independent of Extension amount. The eroded core stays opaque where it was opaque.'),
         ):
             _slider(group, *args)
         output_premult = nuke.Boolean_Knob('output_premult', 'Premult output')
         output_premult.setValue(True)
-        output_premult.setTooltip('On: multiply RGB by output alpha for compositing. Off: expose straight RGB, including extended colors outside alpha. The extension preserves the eroded core and fills only within Color reach. This toggle does not change alpha or Edge opacity.')
+        output_premult.setTooltip('On: multiply RGB by output alpha for compositing. Off: expose straight RGB, including extended colors outside alpha. The replacement mask protects the eroded core; Nuke EdgeExtend generates the surrounding fill. This toggle does not change alpha or Edge opacity.')
         group.addKnob(output_premult)
         group.addKnob(nuke.Enumeration_Knob('preview', 'View', ['Result', 'Despill edge mask', 'Extension mask']))
         group.begin()
@@ -112,28 +117,14 @@ def create_despill():
             despilled.setInput(1, corrected)
             despilled['which'].setExpression('parent.despill_enabled')
             inset = _erode(incoming, 'CleanColorSourceMask', 'extend_width')
-            weighted = _copy_alpha(despilled, inset, 'InsetAlpha')
-            weighted = nuke.nodes.Premult(name='WeightCleanColors', inputs=[weighted], channels='rgb')
-            broad = _fill(weighted, 'BroadFill', 'max(parent.extend_reach,0)')
-            local = _fill(weighted, 'LocalFill', 'max(parent.extend_reach,0)/3')
-            # A local fill with no support falls back to the broad fill.
-            detail_mask = _expression(name='DetailSupport', inputs=[local])
-            detail_mask['expr3'].setValue('a>0.000001 ? clamp(parent.extend_detail,0,1) : 0')
-            fill = _mix(broad, local, detail_mask, 'DetailBlend')
-            # Carry broad support so empty/fully-eroded mattes retain their RGB.
-            fill = _copy_alpha(fill, broad, 'FillSupport')
+            fill = _native_extend(despilled)
             band = _expression(name='ExtensionBand', inputs=[inset])
             band['expr3'].setValue('(1-clamp(a,0,1))*clamp(parent.extend_mix,0,1)')
-            support = _expression(name='ValidFill', inputs=[fill])
-            support['expr3'].setValue('a>0.000001 ? 1 : 0')
-            valid_band = nuke.nodes.Merge2(name='SupportedExtensionBand', operation='multiply', channels='alpha')
-            valid_band.setInput(0, band)
-            valid_band.setInput(1, support)
-            extended = _mix(despilled, fill, valid_band, 'ExtendEdgeColors')
+            extended = _mix(despilled, fill, band, 'ExtendEdgeColors')
             switch = nuke.nodes.Switch(name='ExtensionEnabled')
             switch.setInput(0, despilled)
             switch.setInput(1, extended)
-            switch['which'].setExpression('parent.extend_enabled && parent.extend_width>0 && parent.extend_reach>0')
+            switch['which'].setExpression('parent.extend_enabled')
             restored = _copy_alpha(switch, incoming, 'RestoreOriginalAlpha')
             opacity_factor = _expression(name='EdgeOpacityFactor', inputs=[inset])
             opacity_factor['expr3'].setValue(EDGE_OPACITY_FACTOR)
@@ -141,12 +132,12 @@ def create_despill():
             opacity_alpha.setInput(0, incoming)
             opacity_alpha.setInput(1, opacity_factor)
             adjusted = _copy_alpha(restored, opacity_alpha, 'ApplyEdgeOpacity')
-            adjusted['disable'].setExpression('!parent.extend_enabled || parent.extend_width<=0 || parent.extend_reach<=0')
+            adjusted['disable'].setExpression('!parent.extend_enabled')
             result = nuke.nodes.Premult(name='OutputPremult', inputs=[adjusted], channels='rgb')
             result['disable'].setExpression('!parent.output_premult')
             view = nuke.nodes.Switch(name='Preview')
             view.setInput(0, result)
-            for index, mask in ((1, core_mask), (2, valid_band)):
+            for index, mask in ((1, core_mask), (2, band)):
                 display = _expression(name='MaskPreview%d' % index, inputs=[mask])
                 for channel in range(3):
                     display['expr%d' % channel].setValue('1-clamp(a,0,1)' if index == 1 else 'clamp(a,0,1)')
