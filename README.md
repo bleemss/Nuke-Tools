@@ -77,6 +77,61 @@ groups do not gain these controls automatically; create a new group after update
 
 ### Contact shadows
 
+#### Default straight ground line
+
+New groups include a straight line without needing a Roto node. On **Contact
+Shadow**, leave Ground reference at **Built-in straight line**, enable **Preview
+ground guide**, and adjust **Ground contact Y** on the Shadow tab until the white
+line meets the planted soles. View the Group output or its composite while
+positioning the line. Turn preview off to restore shadows before rendering.
+The line uses the selected character format at group creation (or the root format
+if nothing was selected); recreate the group if that format changes. It follows
+Ground contact Y animation. Use Hold Ground for a fixed floor. This is a procedural
+line, not an editable Roto spline; use an external guide for slopes or curves.
+
+#### Uneven ground: draw an open guide
+
+New groups have an optional second input, **GroundGuide**. The **Contact Shadow**
+tab includes **Ground reference** and **How to draw a ground guide…**; the button
+opens these instructions inside Nuke.
+
+1. Create a separate **Roto** on transparent black in the same image format and
+   coordinates as your positioned character. Leave its background disconnected.
+2. Draw an **open stroked spline** following the walking surface across the full
+   path. Use a thin, approximately 1–2 pixel stroke, opacity 1, rendered in alpha.
+   No closed shape is needed. The line must actually render: an unstroked open
+   path is not enough. An open **RotoPaint brush stroke** is also suitable.
+3. View the guide's **alpha**. Only the ground line should be white; the rest must
+   be transparent. Do not connect a background with an opaque alpha.
+4. Connect the character to the first Group input and the guide to the second.
+5. Choose **Contact Shadow → Ground reference → External ground guide (input 2)**.
+6. Enable contact; try Density `0.8`, Strength `1`, Contact tolerance `3–5`,
+   Patch depth `3–5`, Width spread `3–5`, and Softness `2–4`.
+
+The guide is widened vertically by Contact tolerance, then intersected with the
+character alpha. Only that overlap creates a patch. A lifted foot outside the
+band contributes nothing. The guide stroke thickness adds to the effective
+tolerance, so keep it thin. Patch depth adds vertical dilation around the overlap
+in guide mode; it does not flatten the patch to Ground Y. Width and softness are
+applied afterward and can spread a valid patch beyond the guide line.
+
+For a locked camera and static ground, draw once. Animate only if the surface
+moves in image coordinates. Ground Y/Follow Feet still position the **broad**
+shadow; the guide controls the **contact layer only**. This does not make the
+long cast shadow conform to a 3D surface. It cannot distinguish a hand or prop
+touching the line from a foot, or resolve multiple depth layers at one location.
+
+Built-in straight line is the default and requires no second input. Ground Y (legacy) retains the original contact-band behavior. Guide mode requires
+a connected, rendered alpha stroke; a missing input may produce a Nuke input
+error, and an empty guide gives no contact. Switch back to Ground Y to bypass it.
+Create a new group after updating; existing groups do not gain a second input.
+
+Nuke checks pending: use a thin diagonal/open curved stroke and a moving two-foot
+matte. Confirm contact follows the slope, disappears for a raised foot, stays
+absent outside the stroke's covered area, and responds to tolerance. Also check
+Ground Y with the guide disconnected, empty guide, both broad modes, contact
+disable, and save/reopen. Roto stroke rendering and the Nuke graph need host testing.
+
 New groups have a **Contact Shadow** tab with a separate contact layer combined
 over the long cast shadow. It shares the main shadow color and Ground contact Y,
 including analyzed animation, but has independent density and softness.

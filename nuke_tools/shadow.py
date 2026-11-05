@@ -6,6 +6,35 @@ from .contact import CONTACT_ALPHA, CONTACT_MASK, find_contact
 from .softness import CAST_DISTANCE, UNDER_DISTANCE, distance_mask, widening_mask
 
 
+GROUND_GUIDE_HELP = (
+    "UNEVEN GROUND — OPEN LINE GUIDE\n\n"
+    "New groups start with a built-in straight line: enable Preview ground guide "
+    "and adjust Ground contact Y to the floor, then turn preview off. No Roto is "
+    "needed for flat ground. Choose External ground guide (input 2) for uneven ground.\n\n"
+    "1. Create a separate Roto on transparent black, in the same format and "
+    "coordinates as the positioned character. Do not feed the background into it.\n"
+    "2. Draw an open stroked spline along the ground across the full walking path. "
+    "Give it a thin visible stroke (about 1–2 pixels), opacity 1, output alpha. "
+    "An unstroked open path with no rendered alpha will not work. "
+    "If needed, use an open RotoPaint brush stroke instead. No closed shape is required.\n"
+    "3. View the guide's alpha: only the line should be white. Everything else must "
+    "be transparent. A solid white frame is not a guide.\n"
+    "4. Connect the character to input 1 and the guide to input 2 of CharacterShadow. "
+    "On Contact Shadow, select Ground reference: External ground guide (input 2).\n"
+    "5. Enable contact shadow, set Density 0.8 and Strength 1, then start with "
+    "Contact tolerance 3–5, Patch depth 3–5, Width spread 3–5 and Softness 2–4.\n\n"
+    "Only character alpha overlapping the guide's tolerance band creates a patch. "
+    "Lifted feet outside the band lose contact. Thick guide strokes increase the "
+    "effective tolerance. In guide mode Patch depth adds vertical expansion around "
+    "the overlap; it does not flatten to Ground Y. The guide affects only the "
+    "contact layer; broad cast/under shadows still use Ground contact Y.\n\n"
+    "For a locked camera and static ground, draw once. Animate the guide only "
+    "when the ground moves in the image. This is a 2D contact guide, not a 3D "
+    "surface or automatic foot detector. Missing or empty guide: no valid contact "
+    "result. Switch back to Ground Y to use the original behavior."
+)
+
+
 def hold_ground(group):
     """Freeze the floor at its current evaluated height, with undo support."""
     knob = group["contact_y"]
@@ -209,6 +238,19 @@ def create_shadow():
         enabled = nuke.Boolean_Knob("contact_enabled", "Enable contact shadow")
         group.addKnob(enabled)
         enabled.setValue(True)
+        reference = nuke.Enumeration_Knob("ground_reference", "Ground reference",
+                                          ["Ground Y (legacy)", "Built-in straight line",
+                                           "External ground guide (input 2)"])
+        group.addKnob(reference)
+        reference.setValue(1)
+        reference.setTooltip("Optional second input: a thin open stroke rendered into alpha. It controls contact only; broad shadows keep using Ground contact Y.")
+        preview = nuke.Boolean_Knob("preview_ground", "Preview ground guide")
+        group.addKnob(preview)
+        preview.setValue(False)
+        preview.setTooltip("Temporarily output the ground guide as a white line. Adjust Ground contact Y for the built-in line, then turn preview off before rendering. Legacy mode previews the straight line.")
+        guide_help = nuke.PyScript_Knob("ground_guide_help", "How to draw a ground guide…")
+        guide_help.setCommand("from nuke_tools.shadow import GROUND_GUIDE_HELP\nnuke.message(GROUND_GUIDE_HELP)")
+        group.addKnob(guide_help)
         for name, label, default, low, high in (
             ("contact_band", "Contact tolerance (pixels)", 5, 1, 100),
             ("contact_depth", "Patch depth (pixels)", 5, 1, 100),
@@ -221,7 +263,8 @@ def create_shadow():
             knob.setRange(low, high)
             group.addKnob(knob)
             knob.setValue(default)
-        group["contact_band"].setTooltip("Alpha touching the floor is strongest and fades to zero at this height above Ground contact Y. Start at 5 pixels. Keep the ground line fixed for a level floor; tracking raised feet defeats the contact test.")
+        group["contact_band"].setTooltip("Ground Y: fading band above the floor. Ground guide: vertical dilation of the drawn stroke in both directions before intersecting the character alpha. Start at 3–5 pixels; a thick stroke increases tolerance.")
+        group["contact_depth"].setTooltip("Ground Y: flattened patch depth. Ground guide: additional vertical dilation around the contact overlap. It remains at the guide rather than moving to Ground Y.")
         group["contact_width"].setTooltip("Extra horizontal blur spreads each footprint without moving it sideways.")
         group["contact_strength"].setTooltip("Animate down for jumps or incorrect contact. This affects the whole contact layer, not individual feet.")
         note = nuke.Text_Knob("help", "", "Place Ground contact at the feet. Reach moves the tip left/right.\n"
@@ -230,7 +273,16 @@ def create_shadow():
         group.addKnob(note)
         group.begin()
         try:
-            input_node = nuke.nodes.Input(name="CharacterAlpha")
+            input_node = nuke.nodes.Input(name="CharacterAlpha", number=0)
+            ground_input = nuke.nodes.Input(name="GroundGuide", number=1)
+            canvas = nuke.nodes.Constant(name="StraightGroundCanvas")
+            canvas["format"].setValue(source.format() if source is not None else nuke.root().format())
+            straight = nuke.nodes.Expression(name="BuiltInGroundLine", inputs=[canvas])
+            straight["expr3"].setValue("abs(y-parent.contact_y)<=0.5")
+            guide = nuke.nodes.Switch(name="GroundGuideSource")
+            guide.setInput(0, straight)
+            guide.setInput(1, ground_input)
+            guide["which"].setExpression("parent.ground_reference==2")
             silhouette = nuke.nodes.Expression(name="ShadowMatte", inputs=[input_node])
             for channel in ("expr0", "expr1", "expr2"):
                 silhouette[channel].setValue("0")
@@ -298,7 +350,22 @@ def create_shadow():
             flatten["center"].setExpression("parent.contact_y", 1)
             flatten["scale"].setValue(1, 0)
             flatten["scale"].setExpression("max(parent.contact_depth,1)/max(parent.contact_band,1)", 1)
-            contact_blur = nuke.nodes.Blur(name="ContactSoftness", inputs=[flatten], channels="alpha")
+            # A rendered open stroke can follow arbitrary ground contours. Keep
+            # this branch in image coordinates rather than flattening to Y.
+            guide_band = nuke.nodes.Dilate(name="GroundGuideTolerance", inputs=[guide], channels="alpha")
+            guide_band["size"].setValue(0, 0)
+            guide_band["size"].setExpression("max(parent.contact_band,1)", 1)
+            overlap = nuke.nodes.Merge2(name="CharacterTouchesGuide", operation="multiply", channels="alpha")
+            overlap.setInput(0, silhouette)
+            overlap.setInput(1, guide_band)
+            ground_patch = nuke.nodes.Dilate(name="GroundGuidePatchDepth", inputs=[overlap], channels="alpha")
+            ground_patch["size"].setValue(0, 0)
+            ground_patch["size"].setExpression("max(parent.contact_depth,1)/2", 1)
+            contact_source = nuke.nodes.Switch(name="GroundContactReference")
+            contact_source.setInput(0, flatten)
+            contact_source.setInput(1, ground_patch)
+            contact_source["which"].setExpression("parent.ground_reference>0")
+            contact_blur = nuke.nodes.Blur(name="ContactSoftness", inputs=[contact_source], channels="alpha")
             contact_blur["size"].setExpression("max(parent.contact_width,0)+max(parent.contact_softness,0)", 0)
             contact_blur["size"].setExpression("max(parent.contact_softness,0)", 1)
             contact_color = nuke.nodes.Expression(name="ContactColorAndDensity", inputs=[contact_blur])
@@ -312,7 +379,14 @@ def create_shadow():
             output_switch.setInput(0, base_shadow)
             output_switch.setInput(1, combined)
             output_switch["which"].setExpression("parent.contact_enabled")
-            nuke.nodes.Output(inputs=[output_switch])
+            guide_view = nuke.nodes.Expression(name="GroundGuidePreview", inputs=[guide])
+            for channel in ("expr0", "expr1", "expr2", "expr3"):
+                guide_view[channel].setValue("clamp(a,0,1)")
+            preview_output = nuke.nodes.Switch(name="PreviewGroundEnabled")
+            preview_output.setInput(0, output_switch)
+            preview_output.setInput(1, guide_view)
+            preview_output["which"].setExpression("parent.preview_ground")
+            nuke.nodes.Output(inputs=[preview_output])
         finally:
             group.end()
         if source is not None:
