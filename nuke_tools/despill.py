@@ -5,6 +5,16 @@ import nuke
 from .despill_math import EDGE_OPACITY_FACTOR, NORMALIZE, green_expression
 
 
+
+def _expression(**kwargs):
+    """Route each expression explicitly; do not depend on host defaults."""
+    node = nuke.nodes.Expression(**kwargs)
+    for index, (channel, identity) in enumerate(zip(
+            ('rgba.red', 'rgba.green', 'rgba.blue', 'rgba.alpha'), 'rgba')):
+        node['channel%d' % index].setValue(channel)
+        node['expr%d' % index].setValue(identity)
+    return node
+
 def _slider(group, name, label, value, maximum, tooltip):
     knob = nuke.Double_Knob(name, label)
     knob.setRange(0, maximum)
@@ -39,7 +49,7 @@ def _erode(source, name, width):
 def _fill(source, name, radius):
     blur = nuke.nodes.Blur(name=name + 'WeightedBlur', inputs=[source], channels='rgba')
     blur['size'].setExpression(radius)
-    normalized = nuke.nodes.Expression(name=name + 'Normalize', inputs=[blur])
+    normalized = _expression(name=name + 'Normalize', inputs=[blur])
     for index, channel in enumerate('rgb'):
         normalized['expr%d' % index].setValue(NORMALIZE.format(channel=channel))
     return normalized
@@ -92,9 +102,9 @@ def create_despill():
             unpremult = nuke.nodes.Unpremult(name='InputUnpremult', inputs=[incoming], channels='rgb')
             unpremult['disable'].setExpression('!parent.input_premult')
             core_mask = _erode(incoming, 'CoreMask', 'edge_width')
-            core = nuke.nodes.Expression(name='CoreDespill', inputs=[unpremult])
+            core = _expression(name='CoreDespill', inputs=[unpremult])
             core['expr1'].setValue(green_expression('core_strength'))
-            edge = nuke.nodes.Expression(name='EdgeDespill', inputs=[unpremult])
+            edge = _expression(name='EdgeDespill', inputs=[unpremult])
             edge['expr1'].setValue(green_expression('edge_strength'))
             corrected = _mix(edge, core, core_mask, 'SeparateCoreAndEdge')
             despilled = nuke.nodes.Switch(name='DespillEnabled')
@@ -107,14 +117,14 @@ def create_despill():
             broad = _fill(weighted, 'BroadFill', 'max(parent.extend_reach,0)')
             local = _fill(weighted, 'LocalFill', 'max(parent.extend_reach,0)/3')
             # A local fill with no support falls back to the broad fill.
-            detail_mask = nuke.nodes.Expression(name='DetailSupport', inputs=[local])
+            detail_mask = _expression(name='DetailSupport', inputs=[local])
             detail_mask['expr3'].setValue('a>0.000001 ? clamp(parent.extend_detail,0,1) : 0')
             fill = _mix(broad, local, detail_mask, 'DetailBlend')
             # Carry broad support so empty/fully-eroded mattes retain their RGB.
             fill = _copy_alpha(fill, broad, 'FillSupport')
-            band = nuke.nodes.Expression(name='ExtensionBand', inputs=[inset])
+            band = _expression(name='ExtensionBand', inputs=[inset])
             band['expr3'].setValue('(1-clamp(a,0,1))*clamp(parent.extend_mix,0,1)')
-            support = nuke.nodes.Expression(name='ValidFill', inputs=[fill])
+            support = _expression(name='ValidFill', inputs=[fill])
             support['expr3'].setValue('a>0.000001 ? 1 : 0')
             valid_band = nuke.nodes.Merge2(name='SupportedExtensionBand', operation='multiply', channels='alpha')
             valid_band.setInput(0, band)
@@ -125,7 +135,7 @@ def create_despill():
             switch.setInput(1, extended)
             switch['which'].setExpression('parent.extend_enabled && parent.extend_width>0 && parent.extend_reach>0')
             restored = _copy_alpha(switch, incoming, 'RestoreOriginalAlpha')
-            opacity_factor = nuke.nodes.Expression(name='EdgeOpacityFactor', inputs=[inset])
+            opacity_factor = _expression(name='EdgeOpacityFactor', inputs=[inset])
             opacity_factor['expr3'].setValue(EDGE_OPACITY_FACTOR)
             opacity_alpha = nuke.nodes.Merge2(name='EdgeOpacityAlpha', operation='multiply', channels='alpha')
             opacity_alpha.setInput(0, incoming)
@@ -137,7 +147,7 @@ def create_despill():
             view = nuke.nodes.Switch(name='Preview')
             view.setInput(0, result)
             for index, mask in ((1, core_mask), (2, valid_band)):
-                display = nuke.nodes.Expression(name='MaskPreview%d' % index, inputs=[mask])
+                display = _expression(name='MaskPreview%d' % index, inputs=[mask])
                 for channel in range(3):
                     display['expr%d' % channel].setValue('1-clamp(a,0,1)' if index == 1 else 'clamp(a,0,1)')
                 display['expr3'].setValue('1')
