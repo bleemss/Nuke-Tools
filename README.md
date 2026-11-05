@@ -291,3 +291,63 @@ and a relink followed by Undo. Confirm the current frame is restored. Scanning
 checks file existence, not decoding, movie frame counts, or media corruption;
 it does not audit DeepRead nodes. Relative paths use the host's working-directory
 resolution. Large network sequences may take time to inspect.
+
+## Green Despill and Edge Extend
+
+Add this to your Nuke `menu.py` after the repository plugin path setup:
+
+```python
+from nuke_tools.despill import install_menu as install_despill_menu
+install_despill_menu()
+```
+
+Select a keyed foreground and choose **Nuke Tools → Despill and Edge Extend**.
+The input must contain the final foreground alpha. This tool does not generate a
+key. It creates an editable native-node Group with two sequential stages.
+
+1. **Despill:** automatically removes green above a weighted red/blue reference.
+   Core despill and Edge despill set independent strengths. Edge thickness erodes
+   the alpha inward to define the core; increasing it puts more of the foreground
+   into the edge region. Soft alpha blends the corrections. Red / blue reference
+   selects the reference balance; Green tolerance preserves small excesses.
+   Green clothing and other intentional green also trigger this color heuristic;
+   reduce the relevant strength or mask those areas in your composite.
+2. **Edge Extend:** enable after tuning despill. Its independent Edge thickness
+   sets an inset source region and the band to replace. Color reach spreads clean
+   inset colors using alpha-weighted blurs. Replicate local detail blends a broad
+   smooth fill with a smaller, more local fill; the local fill falls back to the
+   broad fill where it has no support. Extension amount blends with the despilled
+   image. Increase reach when the inset cannot reach the edge; reduce thickness
+   if thin hair or small features disappear from the source region.
+   **Edge opacity** independently multiplies alpha in this same edge band:
+   `1` preserves it, `0` removes the edge, and intermediate values soften its
+   contribution. The eroded core is preserved, with a blend across soft alpha.
+   This applies even when Extension amount is zero, but is bypassed when edge
+   extension is disabled or its thickness or reach is zero.
+
+Input is assumed premultiplied by default; uncheck that option for straight RGB.
+Result alpha is preserved at the default Edge opacity of `1`. Lower values reduce
+only edge-band alpha. **Premult output** is on by default and multiplies RGB by
+the resulting alpha for compositing. Turn it off to expose straight RGB and the
+extended colors filling transparent space around the foreground. Enable Edge
+Extend and increase Color reach to fill more surrounding space; pixels beyond
+the fill's support are not reconstructed. The eroded core keeps its despilled
+colors, while the adjustable edge band receives the fill. Premult output changes
+neither alpha nor Edge opacity; add a Premult downstream when ready to composite.
+Color extension does not expand matte coverage; Edge opacity can reduce it.
+Use View to inspect the
+despill edge band or supported extension mask, then return to Result before render.
+
+This is a local color extension, not texture synthesis or optical reconstruction.
+It can soften fine detail and cannot fill farther than the blur support. Fully
+empty or fully eroded source regions retain their despilled colors. Large reach
+values cost more to render. No source files are modified.
+
+Host validation is pending: in Nuke 17.0v4, check node creation, both input
+premultiplication modes, neutral/green/HDR patches, separate core/edge strengths,
+animated widths, thin hair and holes, extension support, RGB outside alpha in
+straight output, alpha preservation at full opacity, edge-only opacity reduction,
+extension bypass, Premult output on/off, preservation of core RGB with extension,
+Undo, and save/reopen. Existing groups must be recreated to get the new controls.
+The cloud tests
+exercise despill arithmetic; they do not validate Nuke node APIs or rendering.
